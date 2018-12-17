@@ -1,0 +1,43 @@
+module load java
+module load star/2.6.0c
+
+1. generate genome index for STAR, just one time run, don't need to run it for each sample
+cd /hpc/users/wangm08/Wenhui/IBD/colon/data/gatk_somatic_snv/genome_dir
+STAR --runMode genomeGenerate --genomeDir /hpc/users/wangm08/Wenhui/IBD/colon/data/gatk_somatic_snv/genome_dir --genomeFastaFiles /hpc/users/wangm08/Wenhui/IBD/colon/data/gatk_somatic_snv/genome_dir/ucsc.hg19.fasta --runThreadN 8
+java -jar /hpc/packages/minerva-common/picard/1.93/bin/CreateSequenceDictionary.jar R= /hpc/users/wangm08/Wenhui/IBD/colon/data/gatk_somatic_snv/genome_dir/ucsc.hg19.fasta O= /hpc/users/wangm08/Wenhui/IBD/colon/data/gatk_somatic_snv/genome_dir/ucsc.hg19.dict
+
+2. 1-pass run
+cd /hpc/users/wangm08/Wenhui/IBD/colon/data/gatk_somatic_snv/rnaseq_snp_gatk/1pass/
+STAR --genomeDir /hpc/users/wangm08/Wenhui/IBD/colon/data/gatk_somatic_snv/genome_dir --readFilesIn /sc/orga/scratch/zhuj05/THCA/lijx/rna/fastq/1r_1.fastq /sc/orga/scratch/zhuj05/THCA/lijx/rna/fastq/1r_2.fastq --runThreadN 8
+
+3. generate new index for genome based on 1-pass run
+cd /hpc/users/wangm08/Wenhui/IBD/colon/data/gatk_somatic_snv/rnaseq_snp_gatk/hg19_2pass
+STAR --runMode genomeGenerate --genomeDir /sc/orga/projects/zhuj05a/Wenhui/IBD/colon/data/gatk_somatic_snv/rnaseq_snp_gatk/hg19_2pass --genomeFastaFiles /hpc/users/wangm08/Wenhui/IBD/colon/data/gatk_somatic_snv/genome_dir/ucsc.hg19.fasta --sjdbFileChrStartEnd /hpc/users/wangm08/Wenhui/IBD/colon/data/gatk_somatic_snv/rnaseq_snp_gatk1pass/SJ.out.tab --sjdbOverhang 75 --runThreadN 8
+
+4. 2-pass run based on new generated genome index
+cd /hpc/users/wangm08/Wenhui/IBD/colon/data/gatk_somatic_snv/rnaseq_snp_gatk/2pass
+STAR --genomeDir /sc/orga/projects/zhuj05a/Wenhui/IBD/colon/data/gatk_somatic_snv/rnaseq_snp_gatk/hg19_2pass --readFilesIn /sc/orga/scratch/zhuj05/THCA/lijx/rna/fastq/1r_1.fastq /sc/orga/scratch/zhuj05/THCA/lijx/rna/fastq/1r_2.fastq --runThreadN 8
+
+5. add read group and sort bam
+java -jar /hpc/packages/minerva-common/picard/1.93/bin/AddOrReplaceReadGroups.jar INPUT=/hpc/users/wangm08/Wenhui/IBD/colon/data/gatk_somatic_snv/rnaseq_snp_gatk/2pass/Aligned.out.sam OUTPUT=/hpc/users/wangm08/Wenhui/IBD/colon/data/gatk_somatic_snv/rnaseq_snp_gatk/2pass/Aligned.out.addgroup.bam RGID=1r RGSM=1r RGLB=RNAseq RGPL=illumina RGPU=none SO=coordinate
+
+6. Mark dupilcates
+java  -Xmx8G -jar /hpc/packages/minerva-common/picard/1.93/bin/MarkDuplicates.jar INPUT=/hpc/users/wangm08/Wenhui/IBD/colon/data/gatk_somatic_snv/rnaseq_snp_gatk/2pass/Aligned.out.addgroup.bam OUTPUT=/hpc/users/wangm08/Wenhui/IBD/colon/data/gatk_somatic_snv/rnaseq_snp_gatk/2pass/Aligned.out.addgroup.dedupped.bam CREATE_INDEX=true VALIDATION_STRINGENCY=SILENT M=/hpc/users/wangm08/Wenhui/IBD/colon/data/gatk_somatic_snv/rnaseq_snp_gatk/2pass/output.metrics
+
+
+7. Split'N'Trim and reassign mapping qualities
+java -jar -Xmx4g /hpc/packages/minerva-common/gatk/3.6-0/src/GenomeAnalysisTK.jar -T SplitNCigarReads -R /hpc/users/wangm08/Wenhui/IBD/colon/data/gatk_somatic_snv/genome_dir/ucsc.hg19.fasta -I /hpc/users/wangm08/Wenhui/IBD/colon/data/gatk_somatic_snv/rnaseq_snp_gatk/2pass/Aligned.out.addgroup.dedupped.bam -o /hpc/users/wangm08/Wenhui/IBD/colon/data/gatk_somatic_snv/rnaseq_snp_gatk/2pass/Aligned.out.addgroup.dedupped.split.bam -rf ReassignOneMappingQuality -RMQF 255 -RMQT 60 -U ALLOW_N_CIGAR_READS
+
+8. Base recalibration
+java -jar /hpc/packages/minerva-common/gatk/3.6-0/src/GenomeAnalysisTK.jar -T BaseRecalibrator -R /hpc/users/wangm08/Wenhui/IBD/colon/data/gatk_somatic_snv/genome_dir/ucsc.hg19.fasta -I /hpc/users/wangm08/Wenhui/IBD/colon/data/gatk_somatic_snv/rnaseq_snp_gatk/2pass/Aligned.out.addgroup.dedupped.split.bam -knownSites /hpc/users/wangm08/Wenhui/IBD/colon/data/gatk_somatic_snv/dbsnp_138.hg19.vcf -knownSites /hpc/users/wangm08/Wenhui/IBD/colon/data/gatk_somatic_snv/Mills_and_1000G_gold_standard.indels.hg19.sites.vcf -o /hpc/users/wangm08/Wenhui/IBD/colon/data/gatk_somatic_snv/rnaseq_snp_gatk/2pass/1r.recal.table
+
+
+java -jar /hpc/packages/minerva-common/gatk/3.6-0/src/GenomeAnalysisTK.jar -T PrintReads -R /hpc/users/wangm08/Wenhui/IBD/colon/data/gatk_somatic_snv/genome_dir/ucsc.hg19.fasta -I /hpc/users/wangm08/Wenhui/IBD/colon/data/gatk_somatic_snv/rnaseq_snp_gatk/2pass/Aligned.out.addgroup.dedupped.split.bam -BQSR /hpc/users/wangm08/Wenhui/IBD/colon/data/gatk_somatic_snv/rnaseq_snp_gatk/2pass/1r.recal.table -o /hpc/users/wangm08/Wenhui/IBD/colon/data/gatk_somatic_snv/rnaseq_snp_gatk/2pass/Aligned.out.addgroup.dedupped.split.recal.bam
+
+9. variant calling
+java -jar /hpc/packages/minerva-common/gatk/3.6-0/src/GenomeAnalysisTK.jar -T HaplotypeCaller -R /hpc/users/wangm08/Wenhui/IBD/colon/data/gatk_somatic_snv/genome_dir/ucsc.hg19.fasta -I /hpc/users/wangm08/Wenhui/IBD/colon/data/gatk_somatic_snv/rnaseq_snp_gatk/2pass/Aligned.out.addgroup.dedupped.split.recal.bam -dontUseSoftClippedBases -stand_call_conf 20.0 -o /hpc/users/wangm08/Wenhui/IBD/colon/data/gatk_somatic_snv/rnaseq_snp_gatk/2pass/1r.vcf
+
+10. variant filtering
+java -jar /hpc/packages/minerva-common/gatk/3.6-0/src/GenomeAnalysisTK.jar -T VariantFiltration -R /hpc/users/wangm08/Wenhui/IBD/colon/data/gatk_somatic_snv/genome_dir/ucsc.hg19.fasta -V /hpc/users/wangm08/Wenhui/IBD/colon/data/gatk_somatic_snv/rnaseq_snp_gatk/2pass/1r.vcf -window 35 -cluster 3 -filterName FS -filter "FS > 30.0" -filterName QD -filter "QD < 2.0" -o /hpc/users/wangm08/Wenhui/IBD/colon/data/gatk_somatic_snv/rnaseq_snp_gatk/2pass/1r.filter.vcf 
+
+11. use the same annotation commend for the vcf file
